@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maghrib Cycle Tracker</title>
+  <!-- Supabase CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center p-4 font-sans">
+
+  <main class="w-full max-w-md mt-6 space-y-6">
+    <!-- Header -->
+    <header class="text-center space-y-1">
+      <h1 class="text-2xl font-bold tracking-wide text-emerald-400">KITARAN MAGHRIB</h1>
+      <p id="currentCycleText" class="text-xs text-slate-400">Mengira kitaran...</p>
+    </header>
+
+    <!-- Scoreboard -->
+    <div class="grid grid-cols-2 gap-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
+        <span class="text-xs text-slate-400 block uppercase tracking-wider">Hari Berjaya</span>
+        <span id="totalWonDays" class="text-4xl font-extrabold text-white">0</span>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
+        <span class="text-xs text-slate-400 block uppercase tracking-wider">Status Semasa</span>
+        <span id="cycleStatusBadge" class="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+          Belum Kunci
+        </span>
+      </div>
+    </div>
+
+    <!-- Panel Tindakan Rutin -->
+    <section class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+      <h2 class="text-sm font-semibold text-slate-300">Selesai semua rutin kitaran ini?</h2>
+      
+      <textarea id="notesInput" rows="2" placeholder="Catatan refleksi hari ini (pilihan)..." 
+        class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"></textarea>
+
+      <button id="lockBtn" onclick="markCycleComplete()" 
+        class="w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition font-bold text-slate-950 rounded-xl text-sm shadow-lg shadow-emerald-950">
+        Kunci Hari Ini (Lepas Maghrib)
+      </button>
+    </section>
+
+    <!-- Sejarah Ringkas -->
+    <section class="space-y-2">
+      <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Rekod Kitaran Lepas</h3>
+      <div id="historyList" class="space-y-2 max-h-60 overflow-y-auto pr-1 text-sm">
+        <p class="text-slate-500 text-xs">Memuat data...</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // --- 1. KONFIGURASI SUPABASE ---
+    const SUPABASE_URL = "https://jrbbiqchqahyjhkxqmgr.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_5NR1DcL0YZ1Z5416-kX_2w_f8la6ycO";
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // --- 2. LOGIK WAKTU MAGHRIB (7:30 PM Anchor) ---
+    function getMaghribCycleDate() {
+      const now = new Date();
+      const cutoff = new Date(now);
+      cutoff.setHours(19, 30, 0, 0); // 7:30 PM
+
+      // Sebelum 7:30 PM: kitaran bermula Maghrib semalam
+      if (now < cutoff) {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return yesterday.toISOString().split('T')[0];
+      }
+      // Selepas 7:30 PM: kitaran bermula Maghrib hari ini
+      return now.toISOString().split('T')[0];
+    }
+
+    const currentCycleDate = getMaghribCycleDate();
+    document.getElementById('currentCycleText').innerText = `Kitaran Bermula: ${currentCycleDate} (7:30 PM)`;
+
+    // --- 3. LOAD DATA DARI SUPABASE ---
+    async function loadTrackerData() {
+      const { data, error } = await db
+        .from('maghrib')
+        .select('*')
+        .order('cycle_date', { ascending: false });
+
+      if (error) {
+        console.error(error);
+        return;
+      }
+
+      // Kira hari berjaya
+      const completedDays = data ? data.filter(item => item.completed).length : 0;
+      document.getElementById('totalWonDays').innerText = completedDays;
+
+      // Semak status kitaran semasa
+      const currentRecord = data ? data.find(item => item.cycle_date === currentCycleDate) : null;
+      const badge = document.getElementById('cycleStatusBadge');
+      const lockBtn = document.getElementById('lockBtn');
+
+      if (currentRecord && currentRecord.completed) {
+        badge.innerText = "Selesai (Berjaya)";
+        badge.className = "inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        lockBtn.disabled = true;
+        lockBtn.innerText = "Kitaran Sudah Dikunci";
+        lockBtn.className = "w-full py-3.5 px-4 bg-slate-800 text-slate-500 rounded-xl text-sm font-bold cursor-not-allowed";
+      } else {
+        badge.innerText = "Belum Kunci";
+        badge.className = "inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30";
+        lockBtn.disabled = false;
+        lockBtn.innerText = "Kunci Hari Ini (Lepas Maghrib)";
+        lockBtn.className = "w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition font-bold text-slate-950 rounded-xl text-sm shadow-lg shadow-emerald-950";
+      }
+
+      // Papar rekod
+      const historyList = document.getElementById('historyList');
+      if (!data || data.length === 0) {
+        historyList.innerHTML = `<p class="text-slate-500 text-xs">Belum ada rekod.</p>`;
+        return;
+      }
+
+      historyList.innerHTML = data.map(item => `
+        <div class="flex items-center justify-between p-3 bg-slate-900/60 border border-slate-800/80 rounded-xl">
+          <div>
+            <div class="font-medium text-slate-200">${item.cycle_date}</div>
+            <div class="text-xs text-slate-400">${item.notes || 'Tiada catatan'}</div>
+          </div>
+          <span class="text-xs font-bold ${item.completed ? 'text-emerald-400' : 'text-rose-400'}">
+            ${item.completed ? 'BERJAYA' : 'TERTINGGAL'}
+          </span>
+        </div>
+      `).join('');
+    }
+
+    // --- 4. HANTAR REKOD SELESAI ---
+    async function markCycleComplete() {
+      const notes = document.getElementById('notesInput').value;
+
+      const { error } = await db
+        .from('maghrib')
+        .upsert({ 
+          cycle_date: currentCycleDate, 
+          completed: true, 
+          notes: notes 
+        }, { onConflict: 'cycle_date' });
+
+      if (error) {
+        alert("Gagal simpan: " + error.message);
+      } else {
+        document.getElementById('notesInput').value = "";
+        loadTrackerData();
+      }
+    }
+
+    // Jalankan semakan bila buka halaman
+    loadTrackerData();
+  </script>
+</body>
+</html>

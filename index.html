@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Maghrib Cycle Tracker</title>
-  <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center p-4 font-sans">
 
   <main class="w-full max-w-md mt-6 space-y-6">
-    <!-- Header -->
     <header class="text-center space-y-1">
       <h1 class="text-2xl font-bold tracking-wide text-emerald-400">KITARAN MAGHRIB</h1>
-      <p id="currentCycleText" class="text-xs text-slate-400">Mengira kitaran...</p>
+      <p id="targetDateText" class="text-xs text-slate-400">Menyemak status kitaran...</p>
     </header>
 
     <!-- Scoreboard -->
@@ -25,24 +25,33 @@
         <span id="totalWonDays" class="text-4xl font-extrabold text-white">0</span>
       </div>
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
-        <span class="text-xs text-slate-400 block uppercase tracking-wider">Status Semasa</span>
+        <span class="text-xs text-slate-400 block uppercase tracking-wider">Status Kunci</span>
         <span id="cycleStatusBadge" class="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
-          Belum Kunci
+          Menyemak...
         </span>
       </div>
     </div>
 
     <!-- Panel Tindakan Rutin -->
     <section class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-      <h2 class="text-sm font-semibold text-slate-300">Selesai semua rutin kitaran ini?</h2>
-      
-      <textarea id="notesInput" rows="2" placeholder="Catatan refleksi hari ini (pilihan)..." 
+      <div>
+        <h2 class="text-sm font-semibold text-slate-200">Kunci Hari: <span id="pendingDateLabel" class="text-emerald-400 font-bold">-</span></h2>
+        <p class="text-xs text-slate-400 mt-1">Sahkan rutin telah selesai untuk kitaran ini.</p>
+      </div>
+
+      <textarea id="notesInput" rows="2" placeholder="Catatan refleksi (pilihan)..." 
         class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"></textarea>
 
-      <button id="lockBtn" onclick="markCycleComplete()" 
-        class="w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition font-bold text-slate-950 rounded-xl text-sm shadow-lg shadow-emerald-950">
-        Kunci Hari Ini (Lepas Maghrib)
-      </button>
+      <div class="flex gap-2">
+        <button id="lockBtn" onclick="markTargetComplete()" 
+          class="flex-1 py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition font-bold text-slate-950 rounded-xl text-sm shadow-lg shadow-emerald-950">
+          Sahkan Berjaya
+        </button>
+        <button onclick="loadTrackerData()" title="Segerak Semula Data"
+          class="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-sm font-bold">
+          🔄
+        </button>
+      </div>
     </section>
 
     <!-- Sejarah Ringkas -->
@@ -55,33 +64,35 @@
   </main>
 
   <script>
-    // --- 1. KONFIGURASI SUPABASE ---
     const SUPABASE_URL = "https://jrbbiqchqahyjhkxqmgr.supabase.co";
     const SUPABASE_KEY = "sb_publishable_5NR1DcL0YZ1Z5416-kX_2w_f8la6ycO";
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // --- 2. LOGIK WAKTU MAGHRIB (7:30 PM Anchor) ---
-    function getMaghribCycleDate() {
+    let nextDateToLock = null;
+
+    // Fungsi cari tarikh sempadan Maghrib terkini yang sah
+    function getLatestEligibleCycleDate() {
       const now = new Date();
       const cutoff = new Date(now);
-      cutoff.setHours(19, 30, 0, 0); // 7:30 PM
+      cutoff.setHours(19, 30, 0, 0);
 
-      // Sebelum 7:30 PM: kitaran bermula Maghrib semalam
+      // Jika sekarang SEBELUM 7:30 PM hari ini, kitaran yang dah tamat dan boleh dikunci ialah Maghrib 2 hari lepas hingga Maghrib semalam
       if (now < cutoff) {
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return yesterday.toISOString().split('T')[0];
+        const d = new Date(now);
+        d.setDate(d.getDate() - 1);
+        return d.toISOString().split('T')[0];
       }
-      // Selepas 7:30 PM: kitaran bermula Maghrib hari ini
       return now.toISOString().split('T')[0];
     }
 
-    const currentCycleDate = getMaghribCycleDate();
-    document.getElementById('currentCycleText').innerText = `Kitaran Bermula: ${currentCycleDate} (7:30 PM)`;
+    // Tambah 1 hari pada format YYYY-MM-DD
+    function addOneDay(dateStr) {
+      const d = new Date(dateStr);
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().split('T')[0];
+    }
 
-    // --- 3. LOAD DATA DARI SUPABASE ---
     async function loadTrackerData() {
-      // Susun dari tarikh terawal ke terkini (ascending: true)
       const { data, error } = await db
         .from('maghrib')
         .select('*')
@@ -92,83 +103,88 @@
         return;
       }
 
-      // Kira jumlah hari berjaya
+      // Kira hari berjaya
       const completedDays = data ? data.filter(item => item.completed).length : 0;
       document.getElementById('totalWonDays').innerText = completedDays;
 
-      // Semak status kitaran hari ini
-      const currentRecord = data ? data.find(item => item.cycle_date === currentCycleDate) : null;
+      // Cari tarikh terakhir yang tersimpan dalam DB
+      let lastSavedDate = "2026-08-30";
+      if (data && data.length > 0) {
+        lastSavedDate = data[data.length - 1].cycle_date;
+      }
+
+      const eligibleDate = getLatestEligibleCycleDate();
+      nextDateToLock = addOneDay(lastSavedDate);
+
+      const targetLabel = document.getElementById('pendingDateLabel');
       const badge = document.getElementById('cycleStatusBadge');
       const lockBtn = document.getElementById('lockBtn');
+      const infoText = document.getElementById('targetDateText');
 
-      if (currentRecord && currentRecord.completed) {
-        badge.innerText = "Selesai (Berjaya)";
+      // Semak jika semua hari sehingga kitaran terkini sudah dikunci
+      if (lastSavedDate >= eligibleDate) {
+        targetLabel.innerText = "Semua Hari Terkini Selesai";
+        badge.innerText = "Up-to-date";
         badge.className = "inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
         lockBtn.disabled = true;
-        lockBtn.innerText = "Kitaran Sudah Dikunci";
-        lockBtn.className = "w-full py-3.5 px-4 bg-slate-800 text-slate-500 rounded-xl text-sm font-bold cursor-not-allowed";
+        lockBtn.innerText = "Tunggu Maghrib Seterusnya (7:30 PM)";
+        lockBtn.className = "flex-1 py-3.5 px-4 bg-slate-800 text-slate-500 rounded-xl text-sm font-bold cursor-not-allowed";
+        infoText.innerText = `Kitaran seterusnya bermula selepas 7:30 PM`;
       } else {
-        badge.innerText = "Belum Kunci";
+        targetLabel.innerText = nextDateToLock;
+        badge.innerText = "Ada Tertunggak";
         badge.className = "inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30";
         lockBtn.disabled = false;
-        lockBtn.innerText = "Kunci Hari Ini (Lepas Maghrib)";
-        lockBtn.className = "w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition font-bold text-slate-950 rounded-xl text-sm shadow-lg shadow-emerald-950";
+        lockBtn.innerText = `Kunci Hari ${nextDateToLock}`;
+        lockBtn.className = "flex-1 py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] transition font-bold text-slate-950 rounded-xl text-sm shadow-lg shadow-emerald-950";
+        infoText.innerText = `Menunggu pengesahan kitaran ${nextDateToLock}`;
       }
 
-      // Senaraikan rekod lepas + tambah slot hari ini di paling bawah jika belum kunci
-      let displayList = data ? [...data] : [];
-      if (!currentRecord) {
-        displayList.push({
-          cycle_date: currentCycleDate,
-          notes: "Sedang berjalan (Maghrib seterusnya 7:30 PM)",
-          completed: false,
-          isTodayPending: true
-        });
-      }
-
+      // Papar senarai sejarah
       const historyList = document.getElementById('historyList');
-      if (displayList.length === 0) {
+      if (!data || data.length === 0) {
         historyList.innerHTML = `<p class="text-slate-500 text-xs">Belum ada rekod.</p>`;
         return;
       }
 
-      historyList.innerHTML = displayList.map(item => `
-        <div class="flex items-center justify-between p-3 rounded-xl border ${item.isTodayPending ? 'bg-amber-500/10 border-amber-500/30' : 'bg-slate-900/60 border-slate-800/80'}">
+      historyList.innerHTML = data.map(item => `
+        <div class="flex items-center justify-between p-3 rounded-xl border bg-slate-900/60 border-slate-800/80">
           <div>
-            <div class="font-medium text-slate-200">
-              ${item.cycle_date} 
-              ${item.isTodayPending ? '<span class="text-[10px] font-bold text-amber-400 ml-1 px-1.5 py-0.5 rounded bg-amber-500/20">HARI INI</span>' : ''}
-            </div>
+            <div class="font-medium text-slate-200">${item.cycle_date}</div>
             <div class="text-xs text-slate-400">${item.notes || 'Tiada catatan'}</div>
           </div>
-          <span class="text-xs font-bold ${item.completed ? 'text-emerald-400' : 'text-amber-400'}">
-            ${item.completed ? 'BERJAYA' : 'BELUM KUNCI'}
+          <span class="text-xs font-bold ${item.completed ? 'text-emerald-400' : 'text-rose-400'}">
+            ${item.completed ? 'BERJAYA' : 'TERTINGGAL'}
           </span>
         </div>
       `).join('');
     }
 
-    // --- 4. HANTAR REKOD SELESAI ---
-    async function markCycleComplete() {
+    async function markTargetComplete() {
+      if (!nextDateToLock) return;
+
       const notes = document.getElementById('notesInput').value;
+      const btn = document.getElementById('lockBtn');
+      btn.disabled = true;
+      btn.innerText = "Menyimpan...";
 
       const { error } = await db
         .from('maghrib')
         .upsert({ 
-          cycle_date: currentCycleDate, 
+          cycle_date: nextDateToLock, 
           completed: true, 
-          notes: notes 
+          notes: notes || 'Kitaran berjaya'
         }, { onConflict: 'cycle_date' });
 
       if (error) {
         alert("Gagal simpan: " + error.message);
+        btn.disabled = false;
       } else {
         document.getElementById('notesInput').value = "";
-        loadTrackerData();
+        await loadTrackerData();
       }
     }
 
-    // Jalankan semakan bila buka halaman
     loadTrackerData();
   </script>
 </body>

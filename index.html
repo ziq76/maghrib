@@ -13,6 +13,7 @@
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center p-4 font-sans">
 
   <main class="w-full max-w-md mt-6 space-y-6">
+    <!-- Header -->
     <header class="text-center space-y-1">
       <h1 class="text-2xl font-bold tracking-wide text-emerald-400">KITARAN MAGHRIB</h1>
       <p id="targetDateText" class="text-xs text-slate-400">Menyemak status kitaran...</p>
@@ -48,7 +49,7 @@
           Sahkan Berjaya
         </button>
         <button onclick="loadTrackerData()" title="Segerak Semula Data"
-          class="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-sm font-bold">
+          class="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 active:scale-95 transition text-slate-200 rounded-xl text-sm font-bold">
           🔄
         </button>
       </div>
@@ -64,34 +65,44 @@
   </main>
 
   <script>
+    // 1. KONFIGURASI SUPABASE
     const SUPABASE_URL = "https://jrbbiqchqahyjhkxqmgr.supabase.co";
     const SUPABASE_KEY = "sb_publishable_5NR1DcL0YZ1Z5416-kX_2w_f8la6ycO";
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     let nextDateToLock = null;
 
-    // Fungsi cari tarikh sempadan Maghrib terkini yang sah
+    // Format tarikh ke YYYY-MM-DD ikut waktu lokal
+    function formatDateLocal(dateObj) {
+      const yyyy = dateObj.getFullYear();
+      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(dateObj.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // Tambah 1 hari pada format string YYYY-MM-DD
+    function addOneDay(dateStr) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const nextDate = new Date(y, m - 1, d + 1);
+      return formatDateLocal(nextDate);
+    }
+
+    // Kira tarikh kitaran paling terkini yang DAH BOLEH dikunci
     function getLatestEligibleCycleDate() {
       const now = new Date();
-      const cutoff = new Date(now);
-      cutoff.setHours(19, 30, 0, 0);
+      // Waktu penanda Maghrib hari ini: 7:30 PM
+      const todayMaghrib = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 30, 0);
 
-      // Jika sekarang SEBELUM 7:30 PM hari ini, kitaran yang dah tamat dan boleh dikunci ialah Maghrib 2 hari lepas hingga Maghrib semalam
-      if (now < cutoff) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 1);
-        return d.toISOString().split('T')[0];
+      // Sebelum jam 7:30 PM hari ini (termasuk awal pagi 12-5 AM), kita boleh kunci sehingga semalam
+      if (now < todayMaghrib) {
+        const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        return formatDateLocal(yesterday);
       }
-      return now.toISOString().split('T')[0];
+      // Selepas 7:30 PM hari ini, kitaran hari ini dah tamat dan layak dikunci
+      return formatDateLocal(now);
     }
 
-    // Tambah 1 hari pada format YYYY-MM-DD
-    function addOneDay(dateStr) {
-      const d = new Date(dateStr);
-      d.setDate(d.getDate() + 1);
-      return d.toISOString().split('T')[0];
-    }
-
+    // 2. MUAT DATA DARI SUPABASE
     async function loadTrackerData() {
       const { data, error } = await db
         .from('maghrib')
@@ -99,7 +110,7 @@
         .order('cycle_date', { ascending: true });
 
       if (error) {
-        console.error(error);
+        console.error("Ralat Supabase:", error);
         return;
       }
 
@@ -107,7 +118,7 @@
       const completedDays = data ? data.filter(item => item.completed).length : 0;
       document.getElementById('totalWonDays').innerText = completedDays;
 
-      // Cari tarikh terakhir yang tersimpan dalam DB
+      // Cari tarikh terakhir disimpan
       let lastSavedDate = "2026-08-30";
       if (data && data.length > 0) {
         lastSavedDate = data[data.length - 1].cycle_date;
@@ -121,15 +132,15 @@
       const lockBtn = document.getElementById('lockBtn');
       const infoText = document.getElementById('targetDateText');
 
-      // Semak jika semua hari sehingga kitaran terkini sudah dikunci
+      // Jika tarikh dalam DB sudah mencapai had eligible date
       if (lastSavedDate >= eligibleDate) {
-        targetLabel.innerText = "Semua Hari Terkini Selesai";
+        targetLabel.innerText = "Semua Selesai";
         badge.innerText = "Up-to-date";
         badge.className = "inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
         lockBtn.disabled = true;
         lockBtn.innerText = "Tunggu Maghrib Seterusnya (7:30 PM)";
         lockBtn.className = "flex-1 py-3.5 px-4 bg-slate-800 text-slate-500 rounded-xl text-sm font-bold cursor-not-allowed";
-        infoText.innerText = `Kitaran seterusnya bermula selepas 7:30 PM`;
+        infoText.innerText = `Kitaran seterusnya dibuka selepas 7:30 PM`;
       } else {
         targetLabel.innerText = nextDateToLock;
         badge.innerText = "Ada Tertunggak";
@@ -140,7 +151,7 @@
         infoText.innerText = `Menunggu pengesahan kitaran ${nextDateToLock}`;
       }
 
-      // Papar senarai sejarah
+      // Papar sejarah dari 31/8 turun ke bawah
       const historyList = document.getElementById('historyList');
       if (!data || data.length === 0) {
         historyList.innerHTML = `<p class="text-slate-500 text-xs">Belum ada rekod.</p>`;
@@ -151,7 +162,7 @@
         <div class="flex items-center justify-between p-3 rounded-xl border bg-slate-900/60 border-slate-800/80">
           <div>
             <div class="font-medium text-slate-200">${item.cycle_date}</div>
-            <div class="text-xs text-slate-400">${item.notes || 'Tiada catatan'}</div>
+            <div class="text-xs text-slate-400">${item.notes || 'Kitaran berjaya'}</div>
           </div>
           <span class="text-xs font-bold ${item.completed ? 'text-emerald-400' : 'text-rose-400'}">
             ${item.completed ? 'BERJAYA' : 'TERTINGGAL'}
@@ -160,6 +171,7 @@
       `).join('');
     }
 
+    // 3. HANTAR REKOD
     async function markTargetComplete() {
       if (!nextDateToLock) return;
 
